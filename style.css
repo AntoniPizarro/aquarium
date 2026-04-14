@@ -1,0 +1,122 @@
+body {
+    background: #1a1a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+#aquarium-container {
+    position: relative;
+    border: 4px solid #333;
+    box-shadow: 0 0 0px rgba(0, 0, 0, 0.5);
+}
+
+canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+    background-color: #1a1a1a;
+}
+
+#test-actions {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    top: 0;
+    left: 0;
+    padding: 20px;
+    margin: 5px;
+    color: #00ff00;
+    border: 1px solid;
+    width: 200px;
+    max-height: 800px;
+    overflow-y: auto;
+}
+
+#test-actions button {
+    background-color: #ffffae;
+    border: 2px solid #00ff00;
+    width: 90%;
+    height: 35px;
+    border-radius: 5px;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+#test-actions button:hover {
+    cursor: pointer;
+    border: 3px solid #007800;
+}
+
+#pixel-scale {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    margin: 5px;;
+    color: #00ff00;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+#delta-time {
+    position: absolute;
+    margin: 5px;
+    top: 0;
+    color: #00ff00;
+    font-family: Arial, Helvetica, sans-serif
+}
+
+#test-indicators {
+    position: absolute;
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-row: 30px auto;
+    gap: 5px;
+    top: 0;
+    right: 0;
+    margin: 5px;
+    color: #3d873d;
+}
+
+.indicator-title {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    color: #ffff00;
+    width: 100%;
+    height: 100%;
+    text-align: center;
+}
+
+#constant-indicators,
+#variable-indicators {
+    grid-row: 2;
+    height: fit-content;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    max-height: 800px;
+    border: 1px solid;
+    overflow-y: auto;
+    font-family: monospace
+}
+
+#constant-indicators {
+    grid-column: 1;
+    color: #3737ff;
+}
+
+#variable-indicators {
+    grid-column: 2;
+    color: #007800;
+}
+
+#variable-indicators b {
+    color: #00ff00;
+}
+
+#constant-indicators b {
+    color: #6868ff;
+}

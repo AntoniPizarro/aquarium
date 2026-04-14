@@ -1,0 +1,142 @@
+import { calculateSalt } from "./utils.js";
+import { Aquarium, Rock } from './models.js';
+import { TANK_WIDTH_CM, TANK_HEIGHT_CM, TANK_DEPTH_CM, VISUAL_SCALE } from "./common.js";
+
+const canvas = document.getElementById('aquariumCanvas');
+export const ctx = canvas.getContext('2d');
+
+// Set canvas internal resolution to match cm (1px = 1cm)
+canvas.width = TANK_WIDTH_CM * VISUAL_SCALE;
+canvas.height = TANK_HEIGHT_CM * VISUAL_SCALE;
+
+// Scale the canvas visually so it's not tiny on your screen
+document.getElementById("pixel-scale-data").innerText = VISUAL_SCALE;
+canvas.style.width = (TANK_WIDTH_CM * VISUAL_SCALE) + 'px';
+canvas.style.height = (TANK_HEIGHT_CM * VISUAL_SCALE) + 'px';
+// Escalamos el contexto
+ctx.scale(VISUAL_SCALE, VISUAL_SCALE);
+
+// Acciones TEST
+document.getElementById("test-btn-1").addEventListener("click", () => {
+    // Añade 5 mg/L de materia orgánica
+    myAquarium.addOrganicMatter(5);
+});
+
+document.getElementById("test-btn-2").addEventListener("click", () => {
+    // Muestra por consola todos los parámetros exactos sin redondear del acuario
+    console.table({
+        currentLiters: myAquarium.currentLiters,
+        saltContentKg: myAquarium.saltContentKg,
+        salinity: myAquarium.salinity,
+        organicMatter: myAquarium.organicMatter,
+        solidWaste: myAquarium.solidWaste,
+        ammonia: myAquarium.ammonia,
+        nitrite: myAquarium.nitrite,
+        nitrate: myAquarium.nitrate,
+        oxygen: myAquarium.oxygen,
+        bacteriaStep1: myAquarium.bacteriaStep1,
+        bacteriaStep2: myAquarium.bacteriaStep2,
+        temperature: myAquarium.temperature,
+        elapsedSimulationTime: myAquarium.elapsedSimulationTime
+    });
+
+});
+
+document.getElementById("test-btn-3").addEventListener("click", () => {
+    // Añade 5 Kg de sal
+    myAquarium.addSalt(0.01);
+});
+
+document.getElementById("test-btn-4").addEventListener("click", () => {
+    // Añade 5 L de agua de osmosis
+    myAquarium.addWater(5);
+});
+
+document.getElementById("test-btn-5").addEventListener("click", () => {
+    // Evitar que coja otra roca si ya tiene una
+    if (currentGameState === STATE_PLACING_ROCK) return;
+
+    activeRock = new Rock(5, 1);
+
+    // Cambiamos el estado
+    currentGameState = STATE_PLACING_ROCK;
+    canvas.style.cursor = "none"; // Ocultamos el cursor del ratón para mayor inmersión
+});
+
+// --- EVENTOS DEL RATÓN ---
+// 1. Mover el ratón: Inmune a la escala visual y redimensionamientos
+window.addEventListener('mousemove', (event) => {
+    if (currentGameState !== STATE_PLACING_ROCK || !activeRock) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const xRel = event.clientX - rect.left;
+    const yRel = event.clientY - rect.top;
+
+    const logicalX = (xRel / rect.width) * myAquarium.width;
+    const logicalY = (yRel / rect.height) * myAquarium.height;
+
+    // Límites rígidos para que el CENTRO de la roca no se salga del acuario
+    // (Puedes ajustarlo para que sea el BORDE el que no se salga)
+    const marginX = activeRock.logicWidth / 2;
+    const marginY = activeRock.logicHeight / 2;
+
+    activeRock.x = logicalX;
+    activeRock.y = logicalY;
+});
+
+// 2. Hacer click: También escuchamos a la ventana por si haces click estando fuera
+window.addEventListener('click', (event) => {
+    if (currentGameState === STATE_PLACING_ROCK && activeRock && event.target.id !== "test-btn-5") {
+
+        activeRock.isFalling = true; // Activamos la física
+
+        currentGameState = STATE_PLAYING;
+        canvas.style.cursor = "default";
+        // NO ponemos activeRock = null aquí, porque necesitamos seguir 
+        // actualizándola en el gameLoop mientras cae.
+    }
+});
+
+const myAquarium = new Aquarium(TANK_WIDTH_CM, TANK_HEIGHT_CM, TANK_DEPTH_CM);
+
+// Estados de simulación
+const STATE_PLAYING = "playing";
+const STATE_PLACING_ROCK = "placing_rock";
+
+let currentGameState = STATE_PLAYING;
+let activeRock = null; // La roca que el jugador tiene "en la mano"
+
+let lastTime = performance.now();
+function gameLoop(currentTime) {
+    const deltaTime = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
+
+    if (currentGameState === STATE_PLAYING) {
+        myAquarium.update(deltaTime);
+
+        // Si hay una roca cayendo, procesar su física
+        if (activeRock && activeRock.isFalling) {
+            activeRock.updatePhysics(deltaTime, myAquarium);
+            // Cuando deje de caer, la función stopFalling la guardará en el acuario
+            if (!activeRock.isFalling) {
+                activeRock = null;
+            }
+        }
+    }
+
+    myAquarium.render();
+
+    if (activeRock) {
+        activeRock.render(ctx);
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Iniciar el bucle pasándole el tiempo actual
+requestAnimationFrame(gameLoop);
+
+var startWaterVolume = 300;
+myAquarium.addWater(startWaterVolume);
+myAquarium.addSalt(calculateSalt(startWaterVolume, 1023));
+myAquarium.addSubstrate(40, 2);

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aquarium</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="shortcut icon" href="fish.png" type="image/x-icon">
+</head>
+
+<body>
+    <div id="test-actions">
+        <button id="test-btn-1">Añadir materia organica (5mg/L)</button>
+        <button id="test-btn-2">Parámetros exactos (consola)</button>
+        <button id="test-btn-3">Añadir sal (0.01Kg)</button>
+        <button id="test-btn-4">Añadir agua osmosis (5L)</button>
+        <button id="test-btn-5">Añadir roca (5Kg)</button>
+    </div>
+    <span id="pixel-scale"><b id="pixel-scale-data">0</b> / 1 (px/cm)</span>
+    <h4 id="delta-time">T+ 00:00:00</h4>
+    <div id="test-indicators">
+        <span class="indicator-title">Constantes</span>
+        <div id="constant-indicators">
+            <span>Ancho: <b id="width-data">0</b> cm</span>
+            <span>Alto: <b id="height-data">0</b> cm</span>
+            <span>Hondo: <b id="deep-data">0</b> cm</span>
+            <span>Litros máx.: <b id="maxLiters-data">0</b> L</span>
+        </div>
+        <span class="indicator-title">Variables</span>
+        <div id="variable-indicators">
+            <span>Litros: <b id="currentLiters-data">0</b> L</span>
+            <span>Nivel agua: <b id="waterLevel-data">0</b> cm</span>
+            <span>Temperatura: <b id="temperature-data">0</b> ºC</span>
+            <span>Salinidad: <b id="salinity-data">0</b> ppm</span>
+            <span>Sal: <b id="salt-data">0</b> Kg</span>
+            <span>Materia org.: <b id="organicMatter-data">0</b> mg/L</span>
+            <span>NH3: <b id="ammonia-data">0</b> mg/L</span>
+            <span>NO2: <b id="nitrite-data">0</b> mg/L</span>
+            <span>NO3: <b id="nitrate-data">0</b> mg/L</span>
+            <span>O2: <b id="oxygen-data">0</b> mg/L</span>
+            <span>Bacterias NH3: <b id="bacteria1-data">0</b> %</span>
+            <span>Bacterias NO2: <b id="bacteria2-data">0</b> %</span>
+            <span>Bacterias NO3: <b id="bacteria3-data">0</b> %</span>
+        </div>
+    </div>
+    <div id="aquarium-container">
+        <canvas id="aquariumCanvas"></canvas>
+    </div>
+    <script type="module" src="./js/main.js"></script>
+</body>
+
+</html>
