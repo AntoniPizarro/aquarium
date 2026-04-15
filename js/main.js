@@ -1,5 +1,5 @@
 import { calculateSalt } from "./utils.js";
-import { Aquarium, Rock } from './models.js';
+import { Aquarium, Rock, LightSource } from './models.js';
 import { TANK_WIDTH_CM, TANK_HEIGHT_CM, TANK_DEPTH_CM, VISUAL_SCALE } from "./common.js";
 
 const canvas = document.getElementById('aquariumCanvas');
@@ -69,19 +69,35 @@ window.addEventListener('mousemove', (event) => {
     if (currentGameState !== STATE_PLACING_ROCK || !activeRock) return;
 
     const rect = canvas.getBoundingClientRect();
+
+    // 1. Posición del ratón en centímetros lógicos
     const xRel = event.clientX - rect.left;
     const yRel = event.clientY - rect.top;
 
     const logicalX = (xRel / rect.width) * myAquarium.width;
     const logicalY = (yRel / rect.height) * myAquarium.height;
 
-    // Límites rígidos para que el CENTRO de la roca no se salga del acuario
-    // (Puedes ajustarlo para que sea el BORDE el que no se salga)
-    const marginX = activeRock.logicWidth / 2;
-    const marginY = activeRock.logicHeight / 2;
+    // 2. Límites de los Cristales (X)
+    // El centro (x) no puede estar a menos de medio ancho del borde
+    const minX = activeRock.logicWidth / 2;
+    const maxX = myAquarium.width - (activeRock.logicWidth / 2);
 
-    activeRock.x = logicalX;
-    activeRock.y = logicalY;
+    activeRock.x = Math.max(minX, Math.min(logicalX, maxX));
+
+    // 3. Límite del Suelo y Techo (Y)
+    // El punto 'activeRock.y' es la BASE de la roca.
+    // El techo es 0, pero como la roca se dibuja hacia arriba, 
+    // la base mínima para que no se salga por arriba es su propia altura.
+    const minY = activeRock.logicHeight;
+
+    // El suelo es el fondo menos la altura de la arena
+    const maxY = myAquarium.height - myAquarium.sandHeight;
+
+    // Intentamos que el ratón esté en el centro de la roca (logicalY + altura/2)
+    let targetBaseY = logicalY + (activeRock.logicHeight / 2);
+
+    // Aplicamos el límite: la base nunca subirá del techo ni bajará de la arena
+    activeRock.y = Math.max(minY, Math.min(targetBaseY, maxY));
 });
 
 // 2. Hacer click: También escuchamos a la ventana por si haces click estando fuera
@@ -114,11 +130,13 @@ function gameLoop(currentTime) {
     if (currentGameState === STATE_PLAYING) {
         myAquarium.update(deltaTime);
 
-        // Si hay una roca cayendo, procesar su física
-        if (activeRock && activeRock.isFalling) {
+        // MODIFICACIÓN AQUÍ:
+        // Procesamos la física si está cayendo O si está pivotando
+        if (activeRock && (activeRock.isFalling || activeRock.isPivotating)) {
             activeRock.updatePhysics(deltaTime, myAquarium);
-            // Cuando deje de caer, la función stopFalling la guardará en el acuario
-            if (!activeRock.isFalling) {
+
+            // Solo la eliminamos de la "mano" cuando AMBOS procesos terminen
+            if (!activeRock.isFalling && !activeRock.isPivotating) {
                 activeRock = null;
             }
         }
@@ -139,4 +157,5 @@ requestAnimationFrame(gameLoop);
 var startWaterVolume = 300;
 myAquarium.addWater(startWaterVolume);
 myAquarium.addSalt(calculateSalt(startWaterVolume, 1023));
-myAquarium.addSubstrate(40, 2);
+myAquarium.addSubstrate(90, 2);
+myAquarium.lights.push(new LightSource(myAquarium, TANK_WIDTH_CM / 2, TANK_WIDTH_CM * 0.4, "panel"));
