@@ -1,25 +1,25 @@
 import { calculateSalt } from "./utils.js";
-import { Aquarium, Rock, LightSource } from './models.js';
+import { Aquarium, Rock, LightSource, WaterPump } from './models.js';
 import { TANK_WIDTH_CM, TANK_HEIGHT_CM, TANK_DEPTH_CM, VISUAL_SCALE } from "./common.js";
 
 const canvas = document.getElementById('aquariumCanvas');
 export const ctx = canvas.getContext('2d');
 
-// Set canvas internal resolution to match cm (1px = 1cm)
 canvas.width = TANK_WIDTH_CM * VISUAL_SCALE;
 canvas.height = TANK_HEIGHT_CM * VISUAL_SCALE;
 
-// Scale the canvas visually so it's not tiny on your screen
+// Escalamos el canvas
 document.getElementById("pixel-scale-data").innerText = VISUAL_SCALE;
 canvas.style.width = (TANK_WIDTH_CM * VISUAL_SCALE) + 'px';
 canvas.style.height = (TANK_HEIGHT_CM * VISUAL_SCALE) + 'px';
+
 // Escalamos el contexto
 ctx.scale(VISUAL_SCALE, VISUAL_SCALE);
 
 // Acciones TEST
 document.getElementById("test-btn-1").addEventListener("click", () => {
     // Añade 5 mg/L de materia orgánica
-    myAquarium.addOrganicMatter(5);
+    myAquarium.addOrganicMatter(5000);
 });
 
 document.getElementById("test-btn-2").addEventListener("click", () => {
@@ -63,28 +63,28 @@ document.getElementById("test-btn-5").addEventListener("click", () => {
     canvas.style.cursor = "none"; // Ocultamos el cursor del ratón para mayor inmersión
 });
 
-// --- EVENTOS DEL RATÓN ---
-// 1. Mover el ratón: Inmune a la escala visual y redimensionamientos
+// Eventos del ratón
+// Mover el ratón: Inmune a la escala visual y redimensionamientos
 window.addEventListener('mousemove', (event) => {
     if (currentGameState !== STATE_PLACING_ROCK || !activeRock) return;
 
     const rect = canvas.getBoundingClientRect();
 
-    // 1. Posición del ratón en centímetros lógicos
+    // Posición del ratón en centímetros lógicos
     const xRel = event.clientX - rect.left;
     const yRel = event.clientY - rect.top;
 
     const logicalX = (xRel / rect.width) * myAquarium.width;
     const logicalY = (yRel / rect.height) * myAquarium.height;
 
-    // 2. Límites de los Cristales (X)
+    // Límites de los Cristales (X)
     // El centro (x) no puede estar a menos de medio ancho del borde
     const minX = activeRock.logicWidth / 2;
     const maxX = myAquarium.width - (activeRock.logicWidth / 2);
 
     activeRock.x = Math.max(minX, Math.min(logicalX, maxX));
 
-    // 3. Límite del Suelo y Techo (Y)
+    // Límite del Suelo y Techo (Y)
     // El punto 'activeRock.y' es la BASE de la roca.
     // El techo es 0, pero como la roca se dibuja hacia arriba, 
     // la base mínima para que no se salga por arriba es su propia altura.
@@ -100,16 +100,14 @@ window.addEventListener('mousemove', (event) => {
     activeRock.y = Math.max(minY, Math.min(targetBaseY, maxY));
 });
 
-// 2. Hacer click: También escuchamos a la ventana por si haces click estando fuera
+// Hacer click: También escuchamos a la ventana por si haces click estando fuera
 window.addEventListener('click', (event) => {
     if (currentGameState === STATE_PLACING_ROCK && activeRock && event.target.id !== "test-btn-5") {
-
-        activeRock.isFalling = true; // Activamos la física
+        // Activamos la física
+        activeRock.isFalling = true;
 
         currentGameState = STATE_PLAYING;
         canvas.style.cursor = "default";
-        // NO ponemos activeRock = null aquí, porque necesitamos seguir 
-        // actualizándola en el gameLoop mientras cae.
     }
 });
 
@@ -120,7 +118,7 @@ const STATE_PLAYING = "playing";
 const STATE_PLACING_ROCK = "placing_rock";
 
 let currentGameState = STATE_PLAYING;
-let activeRock = null; // La roca que el jugador tiene "en la mano"
+let activeRock = null;
 
 let lastTime = performance.now();
 function gameLoop(currentTime) {
@@ -130,12 +128,11 @@ function gameLoop(currentTime) {
     if (currentGameState === STATE_PLAYING) {
         myAquarium.update(deltaTime);
 
-        // MODIFICACIÓN AQUÍ:
-        // Procesamos la física si está cayendo O si está pivotando
+        // Procesamos la física si está cayendo o si está pivotando
         if (activeRock && (activeRock.isFalling || activeRock.isPivotating)) {
             activeRock.updatePhysics(deltaTime, myAquarium);
 
-            // Solo la eliminamos de la "mano" cuando AMBOS procesos terminen
+            // Solo la eliminamos de la "mano" cuando ambos procesos terminen
             if (!activeRock.isFalling && !activeRock.isPivotating) {
                 activeRock = null;
             }
@@ -159,3 +156,4 @@ myAquarium.addWater(startWaterVolume);
 myAquarium.addSalt(calculateSalt(startWaterVolume, 1023));
 myAquarium.addSubstrate(90, 2);
 myAquarium.lights.push(new LightSource(myAquarium, TANK_WIDTH_CM / 2, TANK_WIDTH_CM * 0.4, "panel"));
+myAquarium.pumps.push(new WaterPump(myAquarium, 0, TANK_HEIGHT_CM * 0.4, 80, 0));

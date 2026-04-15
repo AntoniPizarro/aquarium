@@ -7,17 +7,17 @@ export class LightSource {
         this.aquarium = aquarium;
         this.x = x;
         this.y = 0;
-        this.width = widthCm; // Tamaño elegible por el usuario
+        this.width = widthCm;
         this.type = type; // "spot" (foco) o "panel" (pantalla)
         this.intensity = 1.0;
         this.basePAR = type === "spot" ? 800 : 500; // Un foco concentra más luz
     }
 
     getContribution(targetX, targetY, depthLayer, rocks) {
-        // 1. Atenuación por profundidad (común a todas)
+        // Atenuación por profundidad (común a todas)
         const depthFactor = Math.exp(-0.006 * targetY);
 
-        // 2. Lógica de dispersión según tipo
+        // Lógica de dispersión según tipo
         let distanceFactor = 0;
         if (this.type === "spot") {
             // El foco pierde luz radialmente desde un punto
@@ -36,7 +36,7 @@ export class LightSource {
 
         const finalIntensity = this.intensity * depthFactor * distanceFactor;
 
-        // 3. Sombras (Basado en la posición de esta luz específica)
+        // Sombras (Basado en la posición de esta luz específica)
         const isShadow = rocks.some(rock => {
             if (rock.layer <= depthLayer) return false;
             // Si es sombra de foco, la sombra se inclina. Si es panel, es más recta.
@@ -122,18 +122,26 @@ export class Aquarium {
 
         this.simulationSpeed = SECONDS_PER_HOUR;
         this.elapsedSimulationTime = 0;
+        this.elapsedRealTime = 0;
 
-        // ILUMINACIÓN Y SOMBRAS (Al final del constructor)
+        // Iluminación y sombras
         this.lights = [];
         this.waterClarity = 1.0;
 
-        // --- NUEVO: SISTEMA DE HORNEADO DE SOMBRAS ---
+        // Corriente
+        this.pumps = [];
+
+        // Sistema de horneado de sombras
         this.shadowLayer = document.createElement('canvas');
         this.shadowCtx = this.shadowLayer.getContext('2d');
+
         // Le damos el mismo tamaño lógico que al acuario
         this.shadowLayer.width = this.width;
         this.shadowLayer.height = this.height;
         this.shadowsDirty = true;
+
+        // Partículas
+        this.bubbles = [];
 
         this.ui = {
             width: document.getElementById("width-data"),
@@ -154,7 +162,6 @@ export class Aquarium {
         };
     }
 
-    // --- MÉTODOS DE LÓGICA (addWater, addSalt, addSubstrate, etc. se mantienen igual) ---
     addWater(amount) {
         this.currentLiters = Math.min(this.maxCapacity, this.currentLiters + amount);
         this.updateSalinity();
@@ -200,9 +207,7 @@ export class Aquarium {
         if (this.currentLiters > this.maxCapacity) this.currentLiters = this.maxCapacity;
         this.maxBacterialLoad += (rockInstance.mass * 0.5);
         this.updateSalinity();
-
-        // --- NUEVO ---
-        this.shadowsDirty = true; // "¡Eh! Hay una roca nueva, hay que hornear sombras."
+        this.shadowsDirty = true;
     }
 
     getTotalRockVolume() {
@@ -224,17 +229,39 @@ export class Aquarium {
         });
 
         return {
-            intensity: Math.min(1.5, totalIntensity), // Capamos el brillo máximo
+            intensity: Math.min(1.5, totalIntensity),
             par: totalPAR,
             isShadow: isShadow
         };
     }
 
+    getWaterFlowAt(x, y) {
+        let totalVx = 0;
+        let totalVy = 0;
+
+        this.pumps.forEach(pump => {
+            const flow = pump.getFlowAt(x, y);
+
+            if (flow.isDirect) {
+                // Si la burbuja está en el chorro, es empujada violentamente
+                totalVx += flow.vx;
+                totalVy += flow.vy;
+            } else {
+                // TRUCO DE FLUIDOS: Si está fuera del chorro, aplicamos una corriente 
+                // de retorno inversa suave para simular el remolino que vuelve a la bomba.
+                totalVx -= Math.cos(pump.angle) * (pump.power * 0.05);
+                totalVy -= Math.sin(pump.angle) * (pump.power * 0.05);
+            }
+        });
+
+        return { x: totalVx, y: totalVy };
+    }
+
     bakeAllShadows() {
-        // 1. Limpiamos el lienzo de sombras entero
+        // Limpiamos el lienzo de sombras entero
         this.shadowCtx.clearRect(0, 0, this.width, this.height);
 
-        // 2. Calculamos las sombras para todas las luces y todas las rocas
+        // Calculamos las sombras para todas las luces y todas las rocas
         this.lights.forEach(light => {
             if (light.intensity <= 0) return;
 
@@ -283,6 +310,11 @@ export class Aquarium {
 
     update(deltaTime) {
         if (this.currentLiters <= 0) return;
+
+        // Tiempo real (para burbujas y animaciones visuales)
+        const realDt = deltaTime || 0;
+        this.elapsedRealTime += realDt;
+
         const dt = (deltaTime || 0) * this.simulationSpeed;
         this.elapsedSimulationTime += dt;
 
@@ -318,9 +350,61 @@ export class Aquarium {
                 this.bacteriaStep2 += 0.0000003 * (this.maxBacterialLoad - this.bacteriaStep2) * dt * bioTempFactor * oxygenFactor;
             } else { this.bacteriaStep2 *= Math.pow(0.99999, dt); }
 
-            if (this.nitrate > 0.01 && this.rockMass > 1.0) {
+            // Funciona tanto si hay rocas como si hay arena
+            if (this.nitrate > 0.01 && (this.rockMass > 1.0 || this.sandMass > 1.0)) {
                 this.bacteriaStep3 += 0.00000005 * (this.maxBacterialLoad - this.bacteriaStep3) * dt * bioTempFactor;
-            } else { this.bacteriaStep3 *= Math.pow(0.99999, dt); }
+
+                // Consumo de nitratos
+                const conversionRate = 0.000005 * this.bacteriaStep3 * dt * bioTempFactor;
+                const consumedNitrate = this.nitrate * Math.min(conversionRate, 1);
+                this.nitrate -= consumedNitrate;
+
+                // Generación de burbuja visual de Gas Nitrógeno (N2)
+                const bubbleProbability = consumedNitrate * 1500; // Recuerda ajustar esto o usar tu hack para testear
+
+                if (Math.random() < bubbleProbability) {
+
+                    let startX, startY;
+                    let spawnSource = "none";
+
+                    // Decidir si sale de la roca o de la arena (50/50 si existen ambas)
+                    if (this.rocks.length > 0 && this.sandHeight > 0) {
+                        spawnSource = Math.random() > 0.5 ? "rock" : "sand";
+                    } else if (this.rocks.length > 0) {
+                        spawnSource = "rock";
+                    } else if (this.sandHeight > 0) {
+                        spawnSource = "sand";
+                    }
+
+                    // Calcular las coordenadas según el origen
+                    if (spawnSource === "rock") {
+                        const sourceRock = this.rocks[Math.floor(Math.random() * this.rocks.length)];
+                        startX = sourceRock.x + (Math.random() * sourceRock.logicWidth - sourceRock.logicWidth / 2);
+                        startY = sourceRock.y - (Math.random() * sourceRock.logicHeight);
+                    } else if (spawnSource === "sand") {
+                        startX = Math.random() * this.width; // Cualquier punto a lo ancho del acuario
+                        // Las bacterias anaeróbicas viven en la zona profunda de la arena
+                        // Hacemos que nazca en la mitad inferior del sustrato
+                        const sandDeepZone = this.sandHeight * 0.5;
+                        startY = this.height - (Math.random() * sandDeepZone);
+                    }
+
+                    // Crear la burbuja
+                    if (spawnSource !== "none") {
+                        this.bubbles.push({
+                            x: startX,
+                            y: startY,
+                            size: Math.random() * 0.01 + 0.1, // Tu tamaño hiperrealista
+                            speed: Math.random() * 15 + 10,
+                            wobbleSpeed: Math.random() * 2 + 1,
+                            wobbleSize: Math.random() * 1.5 + 0.5,
+                            seed: Math.random() * 100
+                        });
+                    }
+                }
+            } else {
+                this.bacteriaStep3 *= Math.pow(0.99999, dt);
+            }
         }
 
         if (this.solidWaste > 0.001) {
@@ -355,15 +439,37 @@ export class Aquarium {
             this.oxygen = Math.max(0, this.oxygen - (consumedNitrite * 1.1));
         }
 
-        if (this.nitrate > 0.01 && this.rockMass > 0) {
-            const conversionRate = 0.000005 * this.bacteriaStep3 * dt * bioTempFactor;
-            const consumedNitrate = this.nitrate * Math.min(conversionRate, 1);
-            this.nitrate -= consumedNitrate;
-        }
-
         const simulatedDaysPassed = dt / SECONDS_PER_DAY;
         const evaporatedAmount = this.baseEvaporationRate * evapTempFactor * simulatedDaysPassed;
         this.currentLiters = Math.max(0, this.currentLiters - evaporatedAmount);
+
+        // --- ACTUALIZAR POSICIÓN DE BURBUJAS FÍSICAS ---
+        const totalVolumeLiters = this.currentLiters + (this.sandMass / 1.6) + this.getTotalRockVolume();
+        const totalHeightCm = (totalVolumeLiters * 1000) / (this.width * this.depth);
+        const waterYStart = this.height - totalHeightCm;
+
+        for (let i = this.bubbles.length - 1; i >= 0; i--) {
+            let b = this.bubbles[i];
+
+            // 1. Obtener la corriente del agua en ese pixel exacto
+            const flow = this.getWaterFlowAt(b.x, b.y);
+
+            // 2. Aplicar la corriente (eje X e Y)
+            b.x += flow.x * realDt;
+            b.y += flow.y * realDt;
+
+            // 3. Aplicar flotabilidad natural (sube hacia arriba siempre)
+            b.y -= b.speed * realDt;
+
+            // Rebote en los cristales laterales (evita que las burbujas se salgan de la pantalla)
+            if (b.x < 0) { b.x = 0; }
+            if (b.x > this.width) { b.x = this.width; }
+
+            // Explota al llegar arriba
+            if (b.y < waterYStart) {
+                this.bubbles.splice(i, 1);
+            }
+        }
 
         this.updateSalinity();
         this.updateUI();
@@ -412,7 +518,7 @@ export class Aquarium {
         const totalHeightCm = (totalVolumeLiters * 1000) / (this.width * this.depth);
         const waterYStart = this.height - totalHeightCm;
 
-        // 1. DIBUJAR AGUA
+        // Dibujar agua
         if (this.currentLiters > 0) {
             const gradient = ctx.createLinearGradient(0, waterYStart, 0, this.height);
             gradient.addColorStop(0, "#4fa8ff");
@@ -441,7 +547,7 @@ export class Aquarium {
             }
         }
 
-        // 2. DIBUJAR ARENA (ANTES QUE LAS SOMBRAS)
+        // Dibujar arena (antes que las sombras)
         if (this.sandHeight > 0) {
             const sandYStart = this.height - this.sandHeight;
             const sandGradient = ctx.createLinearGradient(0, sandYStart, 0, this.height);
@@ -451,22 +557,28 @@ export class Aquarium {
             ctx.fillRect(0, sandYStart, this.width, this.sandHeight);
         }
 
-        // 3. DIBUJAR SOMBRAS (SOBRE LA ARENA)
+        // Dibujar sombras horneadas (sobre la arena)
         if (this.shadowsDirty) {
-            this.bakeAllShadows(); // Calculamos miles de operaciones... una sola vez.
-            this.shadowsDirty = false; // Marcamos como limpio
+            this.bakeAllShadows();
+            this.shadowsDirty = false;
         }
-        
-        // Dibujamos el lienzo invisible entero de golpe (¡1 sola operación!)
         ctx.drawImage(this.shadowLayer, 0, 0, this.width, this.height);
-        // --------------------------------------------------
 
-        // 4. DIBUJAR ROCAS
+        // Dibujar rocas
         const sortedRocks = [...this.rocks].sort((a, b) => b.layer - a.layer);
         sortedRocks.forEach(rock => rock.render(ctx));
 
-        // 5. DIBUJAR LÁMPARA
+        // Dibujar burbujas
+        ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+        this.bubbles.forEach(b => {
+            ctx.beginPath();
+            const currentX = b.x + Math.sin(this.elapsedRealTime * b.wobbleSpeed + b.seed) * b.wobbleSize;
+            ctx.arc(currentX, b.y, b.size, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
         this.lights.forEach(light => light.render(ctx));
+        this.pumps.forEach(pump => pump.render(ctx));
     }
 }
 
@@ -608,5 +720,69 @@ export class Rock {
         const drawY = -(this.logicHeight) - this.padding;
         mainCtx.drawImage(this.canvas, drawX, drawY, this.logicWidth + this.padding * 2, this.logicHeight + this.padding * 2);
         mainCtx.restore();
+    }
+}
+
+export class WaterPump {
+    constructor(aquarium, x, y, power = 50, angle = 0) {
+        this.aquarium = aquarium;
+        this.x = x;
+        this.y = y;
+        this.power = power;
+        this.angle = angle;
+        this.coneAngle = Math.PI / 4;
+        this.maxDistance = aquarium.width * 0.8;
+    }
+
+    getFlowAt(targetX, targetY) {
+        const dx = targetX - this.x;
+        const dy = targetY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > this.maxDistance || dist < 1) return { vx: 0, vy: 0, isDirect: false };
+
+        const targetAngle = Math.atan2(dy, dx);
+        let angleDiff = targetAngle - this.angle;
+
+        while (angleDiff <= -Math.PI) angleDiff += Math.PI * 2;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+        if (Math.abs(angleDiff) > this.coneAngle) return { vx: 0, vy: 0, isDirect: false };
+
+        const distFactor = Math.pow(1 - (dist / this.maxDistance), 2);
+        const angleFactor = 1 - (Math.abs(angleDiff) / this.coneAngle);
+
+        const strength = this.power * distFactor * angleFactor;
+
+        return {
+            vx: Math.cos(this.angle) * strength,
+            vy: Math.sin(this.angle) * strength,
+            isDirect: true
+        };
+    }
+
+    render(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+
+        // Imán externo (reducido de 30 a 18 de alto)
+        ctx.fillStyle = "#111";
+        ctx.fillRect(-8, -9, 5, 18);
+
+        // Cuerpo de la bomba (reducido de 20 a 12 de ancho/alto)
+        ctx.fillStyle = "#333";
+        ctx.beginPath();
+        // x, y, ancho, alto, radio_borde
+        ctx.roundRect(-2, -6, 12, 12, 3);
+        ctx.fill();
+
+        // Boquilla de salida (radio reducido de 8 a 5)
+        ctx.fillStyle = "#1a5b8c";
+        ctx.beginPath();
+        ctx.arc(10, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
     }
 }

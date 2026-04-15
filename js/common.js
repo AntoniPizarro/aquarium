@@ -1,4 +1,4 @@
-// Physical dimensions (Now these ARE the canvas resolution)
+// Dimensiones físicas (no de canvas)
 export const TANK_WIDTH_CM = 220;
 export const TANK_HEIGHT_CM = 70;
 export const TANK_DEPTH_CM = 30;
