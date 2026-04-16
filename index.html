@@ -11,11 +11,13 @@
 
 <body>
     <div id="test-actions">
-        <button id="test-btn-1">Añadir materia organica (5mg/L)</button>
+        <button id="test-btn-1" disabled>Añadir materia organica (5mg/L)</button>
         <button id="test-btn-2">Parámetros exactos (consola)</button>
         <button id="test-btn-3">Añadir sal (0.01Kg)</button>
         <button id="test-btn-4">Añadir agua osmosis (5L)</button>
         <button id="test-btn-5">Añadir roca (5Kg)</button>
+        <button id="test-btn-6">Añadir pelets (5g)</button>
+        <button id="test-btn-7">Añadir escamas (5g)</button>
     </div>
     <span id="pixel-scale"><b id="pixel-scale-data">0</b> / 1 (px/cm)</span>
     <h4 id="delta-time">T+ 00:00:00</h4>
@@ -39,13 +41,19 @@
             <span>NO2: <b id="nitrite-data">0</b> mg/L</span>
             <span>NO3: <b id="nitrate-data">0</b> mg/L</span>
             <span>O2: <b id="oxygen-data">0</b> mg/L</span>
+            <span>pH: <b id="ph-data">0</b></span>
+            <span>KH: <b id="kh-data">0</b> ºdKH</span>
+            <span>CO2: <b id="co2-data">0</b> mg/L</span>
+            <span>PO4: <b id="phosphate-data">0</b> mg/L</span>
+            <span>Capacidad Max: <b id="maxLiters-data">0</b> L</span>
             <span>Bacterias NH3: <b id="bacteria1-data">0</b> %</span>
             <span>Bacterias NO2: <b id="bacteria2-data">0</b> %</span>
             <span>Bacterias NO3: <b id="bacteria3-data">0</b> %</span>
         </div>
     </div>
     <div id="aquarium-container">
-        <canvas id="aquariumCanvas"></canvas>
+        <canvas id="aquarium-canvas"></canvas>
+        <canvas id="top-canvas"></canvas>
     </div>
     <script type="module" src="./js/main.js"></script>
 </body>
