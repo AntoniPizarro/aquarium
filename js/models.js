@@ -1384,132 +1384,166 @@ export class FlakeFood extends Food {
 }
 
 export class Fish {
-    constructor(aquarium, x, y, speciesKey = "ocellaris") {
+    constructor(aquarium, x, y, speciesData) {
         this.aquarium = aquarium;
+        this.speciesData = speciesData;
 
-        // Cargamos el ADN de la especie (Lo pasaremos desde main.js)
-        this.speciesData = speciesKey;
-
-        // Física y locomoción
         this.x = x;
         this.y = y;
-        this.vx = (Math.random() - 0.5) * 10;
-        this.vy = (Math.random() - 0.5) * 10;
+        this.vx = (Math.random() - 0.5) * 5;
+        this.vy = (Math.random() - 0.5) * 5;
         this.ax = 0;
         this.ay = 0;
 
-        // Heredamos stats biológicos
-        this.maxSpeed = this.speciesData.maxSpeed || 15;
-        this.maxForce = this.speciesData.maxForce || 1.5;
+        // Ajustamos stats para realismo: menos fuerza = nado más fluido/pesado
+        this.maxSpeed = speciesData.maxSpeed || 15;
+        this.maxForce = speciesData.maxForce || 0.5;
         this.angle = 0;
         this.wanderTheta = Math.random() * Math.PI * 2;
+
+        // Creamos un canvas privado para este pez donde pintamos la matriz UNA VEZ
+        this.offscreenCanvas = document.createElement('canvas');
+        this.offscreenCtx = this.offscreenCanvas.getContext('2d');
+        this.pixelSize = this.speciesData.lengthCm / this.speciesData.sprite[0].length;
+
+        this.offscreenCanvas.width = this.speciesData.lengthCm * 20; // Resolución extra para evitar blur
+        this.offscreenCanvas.height = (this.speciesData.sprite.length * this.pixelSize) * 20;
+
+        this.cacheSprite();
+    }
+
+    cacheSprite() {
+        const grid = this.speciesData.sprite;
+        const pSize = 1; // Dibujamos a escala 1:1 en el buffer
+        this.offscreenCanvas.width = grid[0].length * pSize;
+        this.offscreenCanvas.height = grid.length * pSize;
+
+        for (let r = 0; r < grid.length; r++) {
+            for (let c = 0; c < grid[r].length; c++) {
+                const colorCode = grid[r][c];
+                if (colorCode !== "_") {
+                    this.offscreenCtx.fillStyle = this.speciesData.palette[colorCode];
+                    this.offscreenCtx.fillRect(c * pSize, r * pSize, pSize, pSize);
+                }
+            }
+        }
     }
 
     update(dt) {
-        // Cerebro: Calcular qué fuerza aplicar
         this.applyBehaviors();
 
-        // Física: Integración de Euler (Fuerza -> Aceleración -> Velocidad -> Posición)
         this.vx += this.ax * dt;
         this.vy += this.ay * dt;
 
-        // Limitamos la velocidad a la velocidad máxima del pez
+        // Limitamos la velocidad máxima
         const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
         if (speed > this.maxSpeed) {
             this.vx = (this.vx / speed) * this.maxSpeed;
             this.vy = (this.vy / speed) * this.maxSpeed;
         }
 
-        // Movemos al pez
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
-        // Calculamos hacia dónde mira (su rotación en pantalla)
+        // Límites Físicos Duros
+        const totalVol = this.aquarium.currentLiters + (this.aquarium.sandMass / 1.6) + this.aquarium.getTotalRockVolume();
+        const waterHeight = (totalVol * 1000) / (this.aquarium.width * this.aquarium.depth);
+        const waterYStart = this.aquarium.height - waterHeight;
+        const groundY = this.aquarium.height - this.aquarium.sandHeight;
+
+        if (this.y < waterYStart) { this.y = waterYStart; this.vy *= -0.5; }
+        if (this.y > groundY) { this.y = groundY; this.vy *= -0.5; }
+        if (this.x < 0) { this.x = 0; this.vx *= -0.5; }
+        if (this.x > this.aquarium.width) { this.x = this.aquarium.width; this.vx *= -0.5; }
+
+        // Ángulo Visual con límite de inclinación
         if (speed > 0.1) {
-            this.angle = Math.atan2(this.vy, this.vx);
+            let targetAngle = Math.atan2(this.vy, this.vx);
+            targetAngle = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, targetAngle));
+            this.angle += (targetAngle - this.angle) * 0.1;
         }
 
-        // Animación de la cola basada en la velocidad real (si nada más rápido, aletea más rápido)
-        const time = this.aquarium.elapsedRealTime;
-        this.tailAngle = Math.sin(time * (10 + speed * 0.5)) * (0.3 + speed * 0.02);
-
-        // Reseteamos la aceleración para el frame que viene
+        // Reseteo para el siguiente frame
         this.ax = 0;
         this.ay = 0;
     }
 
     applyBehaviors() {
-        // Wander
-        // Proyectamos un círculo imaginario delante del pez
-        const wanderDistance = 30; // Distancia del círculo
-        const wanderRadius = 15;   // Tamaño del círculo
-
-        // Normalizamos la velocidad actual para saber hacia dónde vamos
-        let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-        let dirX = speed === 0 ? Math.cos(this.angle) : this.vx / speed;
-        let dirY = speed === 0 ? Math.sin(this.angle) : this.vy / speed;
-
-        // Centro del círculo proyectado
-        const circleX = this.x + dirX * wanderDistance;
-        const circleY = this.y + dirY * wanderDistance;
-
-        // Cambiamos el ángulo objetivo un poquito cada frame (el "jitter")
-        this.wanderTheta += (Math.random() - 0.5) * 1.5;
-
-        // Calculamos el punto exacto en el borde del círculo
-        const targetX = circleX + Math.cos(this.wanderTheta) * wanderRadius;
-        const targetY = circleY + Math.sin(this.wanderTheta) * wanderRadius;
-
-        // Viramos hacia ese punto
-        this.seek(targetX, targetY, 0.5); // 0.5 es el peso de esta acción
-
-        // Avoidance
-        const margin = 50; // A 50cm del cristal, el pez se asusta y gira
-        let avoidX = 0;
-        let avoidY = 0;
-
-        if (this.x < margin) avoidX = this.maxSpeed;
-        if (this.x > this.aquarium.width - margin) avoidX = -this.maxSpeed;
-        if (this.y < margin) avoidY = this.maxSpeed;
-
-        // Ojo con el suelo: evitamos hundirnos en la arena
+        const totalVol = this.aquarium.currentLiters + (this.aquarium.sandMass / 1.6) + this.aquarium.getTotalRockVolume();
+        const waterHeight = (totalVol * 1000) / (this.aquarium.width * this.aquarium.depth);
+        const waterYStart = this.aquarium.height - waterHeight;
         const groundY = this.aquarium.height - this.aquarium.sandHeight;
-        if (this.y > groundY - margin) avoidY = -this.maxSpeed;
 
-        if (avoidX !== 0 || avoidY !== 0) {
-            // Si hay peligro, la fuerza de repulsión es MASIVA (peso 2.0)
-            this.applyForce(avoidX, avoidY, 2.0);
+        let desiredX = this.vx;
+        let desiredY = this.vy;
+        let needsAvoidance = false;
+
+        const margin = 20;
+
+        // Avoidance (Esquivar cristales)
+        if (this.x < margin) {
+            desiredX = this.maxSpeed;
+            needsAvoidance = true;
+        } else if (this.x > this.aquarium.width - margin) {
+            desiredX = -this.maxSpeed;
+            needsAvoidance = true;
         }
+
+        // Repulsión vertical más suave para no crear rebotes bruscos
+        if (this.y < waterYStart + margin) {
+            desiredY = this.maxSpeed * 0.5;
+            needsAvoidance = true;
+        } else if (this.y > groundY - margin) {
+            desiredY = -this.maxSpeed * 0.5;
+            needsAvoidance = true;
+        }
+
+        if (needsAvoidance) {
+            const steerX = desiredX - this.vx;
+            const steerY = desiredY - this.vy;
+            this.applyForce(steerX, steerY, 2.5);
+        } else {
+            // Wander Elíptico
+            const wanderDistance = 50;
+            const wanderRadius = 15;
+            this.wanderTheta += (Math.random() - 0.5) * 0.2;
+
+            const circleX = this.x + Math.cos(this.angle) * wanderDistance;
+            const circleY = this.y + Math.sin(this.angle) * wanderDistance;
+
+            const targetX = circleX + Math.cos(this.wanderTheta + this.angle) * wanderRadius;
+
+            // LA CLAVE: Multiplicamos el eje Y de la variación por 0.15.
+            // Esto "aplasta" la aleatoriedad vertical. El pez pensará casi siempre en horizontal.
+            const targetY = circleY + Math.sin(this.wanderTheta + this.angle) * wanderRadius * 0.15;
+
+            // Subimos un pelín el peso para que el pez tenga empuje constante
+            this.seek(targetX, targetY, 0.6);
+        }
+
+        // Vejiga Natatoria
+        // Amortiguamos SOLO la velocidad en Y un 5% cada frame
+        // Esto estabiliza al pez en su capa de agua y evita las subidas/bajadas excesivas
+        this.vy *= 0.95;
     }
 
-    seek(targetX, targetY, weight = 1.0) {
-        // Calcula el vector deseado (línea recta hacia el objetivo)
-        const desiredX = targetX - this.x;
-        const desiredY = targetY - this.y;
-
-        const dist = Math.sqrt(desiredX * desiredX + desiredY * desiredY);
-        if (dist === 0) return;
-
-        // Normaliza y escala a la velocidad máxima
-        const normDesiredX = (desiredX / dist) * this.maxSpeed;
-        const normDesiredY = (desiredY / dist) * this.maxSpeed;
-
-        // La fuerza de giro (Steering) = Deseada - Velocidad Actual
-        let steerX = normDesiredX - this.vx;
-        let steerY = normDesiredY - this.vy;
-
-        this.applyForce(steerX, steerY, weight);
+    seek(tx, ty, weight) {
+        const dx = tx - this.x;
+        const dy = ty - this.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > 0) {
+            const desX = (dx / d) * this.maxSpeed;
+            const desY = (dy / d) * this.maxSpeed;
+            this.applyForce(desX - this.vx, desY - this.vy, weight);
+        }
     }
 
     applyForce(fx, fy, weight) {
-        // Limitamos la fuerza a la agilidad máxima del pez (maxForce)
-        const forceMag = Math.sqrt(fx * fx + fy * fy);
-        if (forceMag > this.maxForce) {
-            fx = (fx / forceMag) * this.maxForce;
-            fy = (fy / forceMag) * this.maxForce;
+        const mag = Math.sqrt(fx * fx + fy * fy);
+        if (mag > this.maxForce) {
+            fx = (fx / mag) * this.maxForce;
+            fy = (fy / mag) * this.maxForce;
         }
-
-        // En física real sería F/m = a. Aquí simplificamos asumiendo masa = 1
         this.ax += fx * weight;
         this.ay += fy * weight;
     }
@@ -1518,45 +1552,30 @@ export class Fish {
         ctx.save();
         ctx.translate(this.x, this.y);
 
-        // Inteligencia visual: Si el pez va hacia la izquierda, lo volteamos como un espejo
-        // Así la matriz de píxeles siempre mira hacia adelante y no nada boca arriba
-        if (this.vx < 0) {
-            ctx.scale(-1, 1);
-            ctx.rotate(-this.angle); // Invertimos la rotación para que encaje
-        } else {
-            ctx.rotate(this.angle);
+        // Rotamos el lienzo hacia donde se mueve la física realmente
+        ctx.rotate(this.angle);
+
+        if (Math.abs(this.angle) > Math.PI / 2) {
+            // Si rotamos 180º, el pez queda boca arriba. 
+            // Invirtiendo el eje Y, el pez vuelve a quedar derecho pero mirando a la izquierda. ¡Magia!
+            ctx.scale(1, -1);
         }
 
-        const grid = this.speciesData.sprite;
-        const gridHeight = grid.length;
-        const gridWidth = grid[0].length;
-
-        // Matemáticas clave: Tamaño de 1 píxel lógico = Largo real / Cantidad de columnas
-        const pixelSize = this.speciesData.lengthCm / gridWidth;
-
-        // Centramos el punto de origen (0,0) en la barriga del pez
-        const startX = -(this.speciesData.lengthCm / 2);
-        const startY = -(gridHeight * pixelSize) / 2;
-
-        // Recorremos la matriz 2D
-        for (let r = 0; r < gridHeight; r++) {
-            for (let c = 0; c < gridWidth; c++) {
-                const colorCode = grid[r][c];
-
-                if (colorCode !== "_") { // Ignorar la transparencia
-                    ctx.fillStyle = this.speciesData.palette[colorCode];
-
-                    // Sumamos +0.1 al tamaño del píxel para evitar las "rayitas fantasma" 
-                    // que crea el motor de renderizado entre cuadrados adyacentes
-                    ctx.fillRect(
-                        startX + (c * pixelSize),
-                        startY + (r * pixelSize),
-                        pixelSize + 0.1,
-                        pixelSize + 0.1
-                    );
-                }
-            }
+        // Movimiento Ondulante (Específico de Ocellaris)
+        // Modulamos una rotación VISUAL rápida usando el tiempo y la velocidad
+        // No afecta a la física real, solo a cómo se dibuja
+        if (this.speciesData.name.includes("Ocellaris")) {
+            const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+            // Si nada más rápido, ondula más rápido. Math.sin genera el vaivén.
+            const waddle = Math.sin(this.aquarium.elapsedRealTime * 20) * (0.1 + speed * 0.01);
+            ctx.rotate(waddle);
         }
+
+        const displayW = this.speciesData.lengthCm;
+        const displayH = (this.offscreenCanvas.height / this.offscreenCanvas.width) * displayW;
+
+        // Dibujamos el pez centrado
+        ctx.drawImage(this.offscreenCanvas, -displayW / 2, -displayH / 2, displayW, displayH);
         ctx.restore();
     }
 }
