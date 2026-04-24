@@ -1,6 +1,7 @@
 import { calculateSalt } from "./utils.js";
-import { Aquarium, Rock, LightSource, WaterPump, PelletFood, FlakeFood } from './models.js';
+import { Aquarium, Rock, LightSource, WaterPump, PelletFood, FlakeFood, Fish } from './models.js';
 import { TANK_WIDTH_CM, TANK_HEIGHT_CM, TANK_DEPTH_CM, VISUAL_SCALE } from "./common.js";
+import { SPECIES_CATALOG } from './species.js';
 
 const canvas = document.getElementById("aquarium-canvas");
 const ctx = canvas.getContext("2d");
@@ -91,6 +92,23 @@ document.getElementById("test-btn-7").addEventListener("click", () => {
     currentGameState = STATE_FEEDING;
     canvas.style.cursor = "crosshair";
     currentFood = "flake";
+});
+
+document.getElementById("test-btn-8").addEventListener("click", () => {
+    if (myAquarium.currentLiters > 0) {
+
+        // Elegimos una especie al azar de nuestro archivo species.js
+        const speciesKeys = Object.keys(SPECIES_CATALOG);
+        const randomKey = speciesKeys[Math.floor(Math.random() * speciesKeys.length)];
+        const speciesData = SPECIES_CATALOG[randomKey];
+
+        // Le pasamos todo el paquete de datos al pez
+        const newFish = new Fish(myAquarium, 0, 0, speciesData);
+        myAquarium.addFish(newFish);
+
+    } else {
+        alert("¡Primero necesitas llenar el acuario de agua!");
+    }
 });
 
 // Eventos del ratón

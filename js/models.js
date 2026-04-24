@@ -142,6 +142,8 @@ export class Aquarium {
 
         // Algas
         this.algaeGrowth = 0;
+        this.pendingAlgaeToDistribute = 0;
+        this.pendingAlgaeDeath = 0;
 
         // Temperatura
         this.baseEvaporationRate = (this.width * this.depth) * 0.0003;
@@ -152,8 +154,8 @@ export class Aquarium {
         this.isHeaterOn = false;                // Estado del termostato
 
         // Velocidad de simulación
-        this.simulationSpeed = SECONDS_PER_MINUTE;
-        this.elapsedSimulationTime = 18 * SECONDS_PER_HOUR;
+        this.simulationSpeed = 1;
+        this.elapsedSimulationTime = 12 * SECONDS_PER_HOUR;
         this.elapsedRealTime = 0;
 
         // Iluminación y sombras
@@ -183,6 +185,7 @@ export class Aquarium {
         // Partículas
         this.bubbles = [];
         this.foods = [];
+        this.fishes = [];
 
         // UI
         this.lastUIUpdate = 0;
@@ -255,6 +258,25 @@ export class Aquarium {
         this.maxBacterialLoad += (rockInstance.mass * 0.5);
         this.updateSalinity();
         this.shadowsDirty = true;
+    }
+
+    addFish(fishInstance) {
+        // Calculamos la superficie actual (fórmula consolidada)
+        const totalVolume = this.currentLiters + (this.sandMass / 1.6) + this.getTotalRockVolume();
+        const waterHeight = (totalVolume * 1000) / (this.width * this.depth);
+        const waterYStart = this.height - waterHeight;
+
+        // Calculamos la posición de spawn
+        const margin = 25;
+        const randomX = margin + Math.random() * (this.width - margin * 2);
+        const spawnY = waterYStart + 5;
+
+        // Inyectamos las coordenadas al pez que nos han pasado
+        fishInstance.x = randomX;
+        fishInstance.y = spawnY;
+
+        // Lo registramos en la lista de habitantes
+        this.fishes.push(fishInstance);
     }
 
     getTotalRockVolume() {
@@ -446,11 +468,44 @@ export class Aquarium {
 
             this.oxygen = Math.min(15, this.oxygen + algaeGrowthRate * 5); // Tope de O2
             this.co2 = Math.max(0.01, this.co2 - algaeGrowthRate * 2);
+
+            // ALGAS
+            // Repartimos el crecimiento total del acuario entre las rocas existentes
+            if (algaeGrowthRate > 0 && this.rocks.length > 0) {
+                // Acumulamos el crecimiento en lugar de pintar cada frame
+                this.pendingAlgaeToDistribute += algaeGrowthRate;
+
+                // Solo mandamos repintar las rocas cuando el cambio visual sea de al menos un 5%
+                if (this.pendingAlgaeToDistribute > 0.05) {
+                    const growthPerRock = this.pendingAlgaeToDistribute / this.rocks.length;
+                    this.rocks.forEach(rock => {
+                        rock.updateAlgae(growthPerRock);
+                    });
+                    // Vaciamos el bote
+                    this.pendingAlgaeToDistribute = 0;
+                }
+            }
+
         } else if (this.algaeGrowth > 0) {
-            // NOCHE: Las algas respiran (consumen O2, producen CO2)
+            // NOCHE O INANICIÓN: Las algas respiran y, si no fotosintetizan, mueren poco a poco
             const algaeRespiration = this.algaeGrowth * 0.0001 * dt;
             this.oxygen = Math.max(0, this.oxygen - algaeRespiration);
             this.co2 += algaeRespiration;
+
+            // MUERTE CELULAR
+            // Las algas mueren y se convierten de nuevo en materia orgánica (cerrando el ciclo)
+            const algaeDeathRate = this.algaeGrowth * 0.00005 * dt;
+            this.algaeGrowth -= algaeDeathRate;
+            this.organicMatter += algaeDeathRate;
+
+            this.pendingAlgaeDeath += algaeDeathRate;
+            if (this.pendingAlgaeDeath > 0.05 && this.rocks.length > 0) {
+                const deathPerRock = this.pendingAlgaeDeath / this.rocks.length;
+                this.rocks.forEach(rock => {
+                    rock.updateAlgae(-deathPerRock); // Le pasamos la cantidad en NEGATIVO
+                });
+                this.pendingAlgaeDeath = 0;
+            }
         }
 
         // CO2 y pH (con protección matemática si KH se acerca a 0)
@@ -550,6 +605,9 @@ export class Aquarium {
         // --- 8. ACTUALIZACIÓN FINAL ---
         this.updateBubbles(realDt, waterYStart);
         this.updateFood(realDt, dt, bioTempFactor);
+
+        // Peces
+        this.fishes.forEach(fish => fish.update(realDt));
 
         this.bloomAlpha = Math.min(0.3, this.ammonia * 0.5);
         this.organicTintAlpha = Math.min(0.4, this.organicMatter / 100);
@@ -781,6 +839,7 @@ export class Aquarium {
 
         this.foods.forEach(food => food.render(ctx));
         this.pumps.forEach(pump => pump.render(ctx));
+        this.fishes.forEach(fish => fish.render(ctx));
 
         ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
         this.bubbles.forEach(b => {
@@ -842,6 +901,12 @@ export class Rock {
         this.velocityY = 0;
         this.gravity = 98;
 
+        // ALGAS
+        this.algaeGridSize = 10;
+        this.algaeMap = new Array(this.algaeGridSize * this.algaeGridSize).fill(0);
+        this.totalAlgaeInRock = 0;
+        this.needsRedraw = false; // Flag para saber si hay que actualizar el canvas de la roca
+
         this.isPivotating = false;
         this.pivotingDirection = 0;
         this.pivotingSpeed = 0.4;
@@ -863,6 +928,12 @@ export class Rock {
         this.ctx.scale(VISUAL_SCALE, VISUAL_SCALE);
 
         this.generateProceduralTexture(totalWidth, totalHeight);
+
+        // Guardamos una "foto" de la roca original para no regenerarla con Math.random()
+        this.baseCanvas = document.createElement('canvas');
+        this.baseCanvas.width = this.canvas.width;
+        this.baseCanvas.height = this.canvas.height;
+        this.baseCanvas.getContext('2d').drawImage(this.canvas, 0, 0);
     }
 
     generateProceduralTexture(w, h) {
@@ -946,6 +1017,7 @@ export class Rock {
             // Cuando la roca termina de asentarse en la arena...
             if (this.checkPointCollision(footX, footY, aquarium) || this.pivotingTimer > 0.6) {
                 this.isPivotating = false;
+                this.aquarium = aquarium; // Guardamos la referencia para poder acceder a las sombras
                 aquarium.addPlacedRock(this); // ¡Devolvemos la roca al acuario!
                 aquarium.shadowsDirty = true; // Y actualizamos la sombra
             }
@@ -962,14 +1034,119 @@ export class Rock {
         this.x += direction * 0.5;
     }
 
+    updateAlgae(amount, targetX = null, targetY = null) {
+        if (targetX === null) {
+            if (amount > 0) {
+                // CRECIMIENTO: Repartimos esporas
+                for (let i = 0; i < 5; i++) {
+                    const index = Math.floor(Math.random() * this.algaeMap.length);
+                    this.algaeMap[index] = Math.min(1.0, this.algaeMap[index] + (amount / 5));
+                }
+            } else {
+                // MUERTE: amount es negativo. Vamos quitando intensidad a toda la roca
+                for (let i = 0; i < this.algaeMap.length; i++) {
+                    if (this.algaeMap[i] > 0) {
+                        // Le sumamos el amount (como es negativo, en realidad resta)
+                        this.algaeMap[i] = Math.max(0, this.algaeMap[i] + (amount / 20));
+                    }
+                }
+            }
+        } else {
+            // INTERACCIÓN: Alguien está comiendo o limpiando en un punto
+            const gridX = Math.floor((targetX / this.canvas.width * VISUAL_SCALE) * this.algaeGridSize);
+            const gridY = Math.floor((targetY / this.canvas.height * VISUAL_SCALE) * this.algaeGridSize);
+            const index = gridY * this.algaeGridSize + gridX;
+
+            if (index >= 0 && index < this.algaeMap.length) {
+                this.algaeMap[index] = Math.max(0, this.algaeMap[index] - amount);
+            }
+        }
+
+        this.totalAlgaeInRock = this.algaeMap.reduce((a, b) => a + b, 0);
+        this.needsRedraw = true;
+        if (this.aquarium) this.aquarium.shadowsDirty = true;
+    }
+
     render(mainCtx) {
+        // Si las algas han cambiado, redibujamos la textura interna
+        if (this.needsRedraw) {
+            this.redrawCanvas();
+            this.needsRedraw = false;
+        }
+
         mainCtx.save();
         mainCtx.translate(this.x, this.y);
         mainCtx.rotate(this.angle);
         const drawX = -(this.logicWidth / 2) - this.padding;
         const drawY = -(this.logicHeight) - this.padding;
+
+        // Dibujamos el canvas que ya contiene la roca + las algas
         mainCtx.drawImage(this.canvas, drawX, drawY, this.logicWidth + this.padding * 2, this.logicHeight + this.padding * 2);
         mainCtx.restore();
+    }
+
+    redrawCanvas() {
+        const w = this.canvas.width / VISUAL_SCALE;
+        const h = this.canvas.height / VISUAL_SCALE;
+
+        // Limpieza y fondo (Roca base)
+        this.ctx.save();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.drawImage(this.baseCanvas, 0, 0);
+        this.ctx.restore();
+
+        // Capa de algas (Orgánicas, Dinámicas e Irregulares)
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = 'source-atop';
+
+        // Definimos lo grande que puede llegar a ser una mancha al 100% de densidad
+        const maxRadius = (this.logicWidth / this.algaeGridSize) * 1.5;
+
+        this.algaeMap.forEach((density, i) => {
+            // Umbral muy bajito para que empiecen como polvo verde
+            if (density > 0.005) {
+                const gx = i % this.algaeGridSize;
+                const gy = Math.floor(i / this.algaeGridSize);
+
+                const rx = (gx / this.algaeGridSize) * w;
+                const ry = (gy / this.algaeGridSize) * h;
+
+                // Color verde oliva orgánico, más opaco cuanto más denso
+                const alpha = Math.min(0.85, density * 1.5);
+                this.ctx.fillStyle = `rgba(35, 75, 30, ${alpha})`;
+
+                this.ctx.beginPath();
+
+                // Le damos un mínimo del 10% (0.1) para que exista al nacer, 
+                // y el resto crece según la densidad.
+                const currentRadius = maxRadius * (0.1 + (density * 0.9));
+
+                // Forma irregular
+                const numVertices = 7; // Usamos un heptágono como base
+                for (let v = 0; v <= numVertices; v++) {
+                    const angle = (v / numVertices) * Math.PI * 2;
+
+                    // Usamos el índice de la celda (i) y el vértice (v)
+                    // dentro de una onda seno para generar una irregularidad entre 0.7 y 1.2
+                    const deformation = 0.95 + Math.sin(i * 13 + v * 7) * 0.25;
+
+                    const r = currentRadius * deformation;
+                    const px = rx + Math.cos(angle) * r;
+                    const py = ry + Math.sin(angle) * r;
+
+                    if (v === 0) {
+                        this.ctx.moveTo(px, py);
+                    } else {
+                        this.ctx.lineTo(px, py);
+                    }
+                }
+
+                this.ctx.fill();
+            }
+        });
+
+        this.ctx.restore();
     }
 }
 
@@ -1202,6 +1379,184 @@ export class FlakeFood extends Food {
         }
         ctx.closePath();
         ctx.fill();
+        ctx.restore();
+    }
+}
+
+export class Fish {
+    constructor(aquarium, x, y, speciesKey = "ocellaris") {
+        this.aquarium = aquarium;
+
+        // Cargamos el ADN de la especie (Lo pasaremos desde main.js)
+        this.speciesData = speciesKey;
+
+        // Física y locomoción
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 10;
+        this.vy = (Math.random() - 0.5) * 10;
+        this.ax = 0;
+        this.ay = 0;
+
+        // Heredamos stats biológicos
+        this.maxSpeed = this.speciesData.maxSpeed || 15;
+        this.maxForce = this.speciesData.maxForce || 1.5;
+        this.angle = 0;
+        this.wanderTheta = Math.random() * Math.PI * 2;
+    }
+
+    update(dt) {
+        // Cerebro: Calcular qué fuerza aplicar
+        this.applyBehaviors();
+
+        // Física: Integración de Euler (Fuerza -> Aceleración -> Velocidad -> Posición)
+        this.vx += this.ax * dt;
+        this.vy += this.ay * dt;
+
+        // Limitamos la velocidad a la velocidad máxima del pez
+        const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+        if (speed > this.maxSpeed) {
+            this.vx = (this.vx / speed) * this.maxSpeed;
+            this.vy = (this.vy / speed) * this.maxSpeed;
+        }
+
+        // Movemos al pez
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // Calculamos hacia dónde mira (su rotación en pantalla)
+        if (speed > 0.1) {
+            this.angle = Math.atan2(this.vy, this.vx);
+        }
+
+        // Animación de la cola basada en la velocidad real (si nada más rápido, aletea más rápido)
+        const time = this.aquarium.elapsedRealTime;
+        this.tailAngle = Math.sin(time * (10 + speed * 0.5)) * (0.3 + speed * 0.02);
+
+        // Reseteamos la aceleración para el frame que viene
+        this.ax = 0;
+        this.ay = 0;
+    }
+
+    applyBehaviors() {
+        // Wander
+        // Proyectamos un círculo imaginario delante del pez
+        const wanderDistance = 30; // Distancia del círculo
+        const wanderRadius = 15;   // Tamaño del círculo
+
+        // Normalizamos la velocidad actual para saber hacia dónde vamos
+        let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+        let dirX = speed === 0 ? Math.cos(this.angle) : this.vx / speed;
+        let dirY = speed === 0 ? Math.sin(this.angle) : this.vy / speed;
+
+        // Centro del círculo proyectado
+        const circleX = this.x + dirX * wanderDistance;
+        const circleY = this.y + dirY * wanderDistance;
+
+        // Cambiamos el ángulo objetivo un poquito cada frame (el "jitter")
+        this.wanderTheta += (Math.random() - 0.5) * 1.5;
+
+        // Calculamos el punto exacto en el borde del círculo
+        const targetX = circleX + Math.cos(this.wanderTheta) * wanderRadius;
+        const targetY = circleY + Math.sin(this.wanderTheta) * wanderRadius;
+
+        // Viramos hacia ese punto
+        this.seek(targetX, targetY, 0.5); // 0.5 es el peso de esta acción
+
+        // Avoidance
+        const margin = 50; // A 50cm del cristal, el pez se asusta y gira
+        let avoidX = 0;
+        let avoidY = 0;
+
+        if (this.x < margin) avoidX = this.maxSpeed;
+        if (this.x > this.aquarium.width - margin) avoidX = -this.maxSpeed;
+        if (this.y < margin) avoidY = this.maxSpeed;
+
+        // Ojo con el suelo: evitamos hundirnos en la arena
+        const groundY = this.aquarium.height - this.aquarium.sandHeight;
+        if (this.y > groundY - margin) avoidY = -this.maxSpeed;
+
+        if (avoidX !== 0 || avoidY !== 0) {
+            // Si hay peligro, la fuerza de repulsión es MASIVA (peso 2.0)
+            this.applyForce(avoidX, avoidY, 2.0);
+        }
+    }
+
+    seek(targetX, targetY, weight = 1.0) {
+        // Calcula el vector deseado (línea recta hacia el objetivo)
+        const desiredX = targetX - this.x;
+        const desiredY = targetY - this.y;
+
+        const dist = Math.sqrt(desiredX * desiredX + desiredY * desiredY);
+        if (dist === 0) return;
+
+        // Normaliza y escala a la velocidad máxima
+        const normDesiredX = (desiredX / dist) * this.maxSpeed;
+        const normDesiredY = (desiredY / dist) * this.maxSpeed;
+
+        // La fuerza de giro (Steering) = Deseada - Velocidad Actual
+        let steerX = normDesiredX - this.vx;
+        let steerY = normDesiredY - this.vy;
+
+        this.applyForce(steerX, steerY, weight);
+    }
+
+    applyForce(fx, fy, weight) {
+        // Limitamos la fuerza a la agilidad máxima del pez (maxForce)
+        const forceMag = Math.sqrt(fx * fx + fy * fy);
+        if (forceMag > this.maxForce) {
+            fx = (fx / forceMag) * this.maxForce;
+            fy = (fy / forceMag) * this.maxForce;
+        }
+
+        // En física real sería F/m = a. Aquí simplificamos asumiendo masa = 1
+        this.ax += fx * weight;
+        this.ay += fy * weight;
+    }
+
+    render(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // Inteligencia visual: Si el pez va hacia la izquierda, lo volteamos como un espejo
+        // Así la matriz de píxeles siempre mira hacia adelante y no nada boca arriba
+        if (this.vx < 0) {
+            ctx.scale(-1, 1);
+            ctx.rotate(-this.angle); // Invertimos la rotación para que encaje
+        } else {
+            ctx.rotate(this.angle);
+        }
+
+        const grid = this.speciesData.sprite;
+        const gridHeight = grid.length;
+        const gridWidth = grid[0].length;
+
+        // Matemáticas clave: Tamaño de 1 píxel lógico = Largo real / Cantidad de columnas
+        const pixelSize = this.speciesData.lengthCm / gridWidth;
+
+        // Centramos el punto de origen (0,0) en la barriga del pez
+        const startX = -(this.speciesData.lengthCm / 2);
+        const startY = -(gridHeight * pixelSize) / 2;
+
+        // Recorremos la matriz 2D
+        for (let r = 0; r < gridHeight; r++) {
+            for (let c = 0; c < gridWidth; c++) {
+                const colorCode = grid[r][c];
+
+                if (colorCode !== "_") { // Ignorar la transparencia
+                    ctx.fillStyle = this.speciesData.palette[colorCode];
+
+                    // Sumamos +0.1 al tamaño del píxel para evitar las "rayitas fantasma" 
+                    // que crea el motor de renderizado entre cuadrados adyacentes
+                    ctx.fillRect(
+                        startX + (c * pixelSize),
+                        startY + (r * pixelSize),
+                        pixelSize + 0.1,
+                        pixelSize + 0.1
+                    );
+                }
+            }
+        }
         ctx.restore();
     }
 }
