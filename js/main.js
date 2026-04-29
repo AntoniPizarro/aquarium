@@ -199,7 +199,7 @@ window.addEventListener('click', (event) => {
 
 // Confirmación al salir
 window.addEventListener('beforeunload', (event) => {
-    event.preventDefault();
+    //event.preventDefault();
     event.returnValue = '';
 });
 
@@ -267,7 +267,8 @@ var startWaterVolume = 380;
 myAquarium.addWater(startWaterVolume);
 myAquarium.addSalt(calculateSalt(startWaterVolume, 1023));
 myAquarium.addSubstrate(90, 2);
-myAquarium.pumps.push(new WaterPump(myAquarium, 0, TANK_HEIGHT_CM * 0.4, 80, 0));
+myAquarium.pumps.push(new WaterPump(myAquarium, 0, 15, 25, 0));
+myAquarium.pumps.push(new WaterPump(myAquarium, TANK_WIDTH_CM, 20, 25, Math.PI));
 
 // Luces
 const numLights = 3;
